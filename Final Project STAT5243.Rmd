@@ -1,0 +1,194 @@
+---
+title: "Final Project"
+output: html_notebook
+---
+
+```{r}
+#Project Goal: Trying to understand what predicts admission yield (percent of admitted students who choose to enroll at a university) using various features like SAT scores, tuition, demographics, etc.
+
+#Loading Libraries
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(corrplot)
+library(cluster)
+library(factoextra)
+library(GGally)
+library(psych)
+
+#Loading Dataset
+data_raw <- read_excel("IPEDS_data.xlsx")
+```
+
+
+```{r}
+#Data Overview (Pre-Processing)
+cat("Dataset Dimensions:", dim(data_raw), "\n")
+str(data_raw)
+summary(data_raw)
+```
+
+
+```{r}
+#Visualizing missingness to help w/ cleaning later (showing which variables have missing values and where they occur)
+missing_long <- data_raw %>%
+  mutate(row = row_number()) %>%
+  mutate(across(everything(), as.character)) %>%
+  pivot_longer(-row, names_to = "variable", values_to = "value") %>%
+  mutate(missing = is.na(value) | value == "NA")
+
+ggplot(missing_long, aes(x = variable, y = row, fill = missing)) +
+  geom_raster() +
+  scale_fill_manual(values = c("FALSE" = "white", "TRUE" = "red")) +
+  labs(title = "Missing Data Map", x = "Variables", y = "Rows") +
+  theme_minimal() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.title = element_blank(),
+        axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+```{r}
+#Data Cleaning (column names and removing special characters)
+names(data_raw) <- tolower(gsub("[^[:alnum:]_]", "", gsub(" ", "_", names(data_raw))))
+
+missing_summary <- data.frame(
+  Variable = names(data_raw),
+  Missing_Count = colSums(is.na(data_raw)),
+  Missing_Percent = colSums(is.na(data_raw)) / nrow(data_raw) * 100
+)
+print(missing_summary %>% arrange(desc(Missing_Percent)))
+
+#Dropping variables with >40% missingness so we can impute later
+high_missing_vars <- missing_summary %>%
+  filter(Missing_Percent > 40) %>%
+  pull(Variable)
+
+data_clean <- data_raw %>% select(-all_of(high_missing_vars))
+```
+
+
+```{r}
+#Imputing missing values
+numeric_vars <- data_clean %>% select(where(is.numeric))
+categorical_vars <- data_clean %>% select(where(is.character))
+
+numeric_imputed <- numeric_vars %>%
+  mutate(across(everything(), ~ ifelse(is.na(.x), median(.x, na.rm = TRUE), .x)))
+
+impute_mode <- function(x) {
+  mode_val <- names(sort(table(x), decreasing = TRUE))[1]
+  x[is.na(x)] <- mode_val
+  return(x)
+}
+categorical_imputed <- categorical_vars %>%
+  mutate(across(everything(), impute_mode))
+
+data_imputed <- bind_cols(categorical_imputed, numeric_imputed) %>%
+  distinct()
+
+colnames(data_imputed)
+```
+
+
+```{r}
+#Feature engineering to derive average SAT score
+data_imputed <- data_imputed %>%
+  mutate(sat_avg = rowMeans(
+    select(., sat_critical_reading_25th_percentile_score,
+              sat_critical_reading_75th_percentile_score,
+              sat_math_25th_percentile_score,
+              sat_math_75th_percentile_score),
+    na.rm = TRUE
+  ))
+
+selected_data <- data_imputed %>%
+  select(name,
+         sat_avg,
+         percent_admitted__total,
+         admissions_yield__total,
+         undergraduate_enrollment,
+         control_of_institution,
+         degree_of_urbanization_urbancentric_locale,
+         tuition_and_fees_201314,
+         total_price_for_outofstate_students_living_on_campus_201314,
+         percent_of_total_enrollment_that_are_white,
+         percent_of_total_enrollment_that_are_black_or_african_american,
+         percent_of_total_enrollment_that_are_hispaniclatino,
+         percent_of_total_enrollment_that_are_asian)
+```
+
+
+```{r}
+#Renaming columns for consistency
+selected_data <- selected_data %>%
+  rename(
+    inst_name = name,
+    admission_rate = percent_admitted__total,
+    yield = admissions_yield__total,
+    ugds = undergraduate_enrollment,
+    control = control_of_institution,
+    locale = degree_of_urbanization_urbancentric_locale,
+    tuitionfee_in = tuition_and_fees_201314,
+    tuitionfee_out = total_price_for_outofstate_students_living_on_campus_201314,
+    pct_white = percent_of_total_enrollment_that_are_white,
+    pct_black = percent_of_total_enrollment_that_are_black_or_african_american,
+    pct_hispanic = percent_of_total_enrollment_that_are_hispaniclatino,
+    pct_asian = percent_of_total_enrollment_that_are_asian
+  )
+
+#Converting to factors
+selected_data$control <- as.factor(selected_data$control)
+selected_data$locale <- as.factor(selected_data$locale)
+
+
+#Standardizing numeric variables (whole numbers vs. percentages etc.)
+numeric_scaled <- selected_data %>%
+  select(-inst_name, -control, -locale) %>%
+  scale()
+
+final_data <- bind_cols(
+  selected_data %>% select(inst_name, control, locale),
+  as.data.frame(numeric_scaled)
+)
+```
+
+
+```{r}
+#Basic EDA
+
+  #Descriptive stats
+describe(final_data %>% select(where(is.numeric)))
+
+  #Correlation heatmap
+corrplot(cor(final_data %>% select(where(is.numeric))), 
+         method = "color", type = "upper", order = "hclust")
+
+  #Scatterplot matrix
+ggpairs(final_data, columns = 4:10, aes(color = control), 
+        title = "Scatterplot Matrix")
+
+  #Yield vs SAT
+ggplot(final_data, aes(x = sat_avg, y = yield, color = control)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "SAT vs Yield Rate", x = "Average SAT", y = "Yield (%)")
+
+  #Principle componentn analysis
+pca_result <- prcomp(final_data %>% select(where(is.numeric)), scale. = TRUE)
+fviz_eig(pca_result, addlabels = TRUE, ylim = c(0, 60))
+fviz_pca_biplot(pca_result, repel = TRUE, col.var = "blue", col.ind = "gray")
+
+  #Clustering (using k-means to group similar schools based on PCA)
+set.seed(123)
+pca_data <- pca_result$x[, 1:3]
+kmeans_pca <- kmeans(pca_data, centers = 3)
+fviz_cluster(kmeans_pca, data = pca_data, geom = "point", ellipse.type = "convex")
+
+  #Adding cluster back to data
+final_data$cluster <- as.factor(kmeans_pca$cluster)
+head(final_data)
+
+```
