@@ -2,3 +2,6 @@
 Project Goal: Trying to understand what predicts admission yield (percent of admitted students who choose to enroll at a university) using various features like SAT scores, tuition, demographics, etc.
 
 
+## Dataset
+“American University Data” IPEDS dataset
+- https://www.kaggle.com/datasets/sumithbhongale/american-university-data-ipeds-dataset
