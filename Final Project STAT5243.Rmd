@@ -16,6 +16,7 @@ library(cluster)
 library(factoextra)
 library(GGally)
 library(psych)
+library(writexl)
 
 #Loading Dataset
 data_raw <- read_excel("IPEDS_data.xlsx")
@@ -190,5 +191,7 @@ fviz_cluster(kmeans_pca, data = pca_data, geom = "point", ellipse.type = "convex
   #Adding cluster back to data
 final_data$cluster <- as.factor(kmeans_pca$cluster)
 head(final_data)
+
+write_xlsx(final_data, "cleaned_IPEDS_data.xlsx")
 
 ```
