@@ -7,7 +7,7 @@ Project Goal: Trying to understand what predicts admission yield (percent of adm
 **Clone the Repository:**
 ```
 
-   git clone https://github.com/My990813/Applied-Data-Science-Project-Three.git
+   git clone https://github.com/ruangkawprc/Applied-Data-Science-Final-Project.git
 ```
 
 ## Motivation
